@@ -1,0 +1,7 @@
+PyQt6>=6.11
+torch>=2.4
+onnx>=1.16
+onnxruntime-directml>=1.20
+numpy>=1.26
+requests>=2.31
+psutil>=6.0
