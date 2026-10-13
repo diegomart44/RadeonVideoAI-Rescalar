@@ -5,7 +5,11 @@ This build is focused solely on "Reescalar con IA": Real-ESRGAN-family
 restoration/upscaling (core/engine.py + core/inference.py). The Generar
 (Stable Diffusion recreation) and Interpolar (RIFE frame interpolation)
 tabs from the full RadeonVideoAI suite were deliberately removed here to
-keep this variant single-purpose.
+keep this variant single-purpose. "Mejorar Audio" (VoiceFixer speech
+restoration, core/audio_engine.py + core/audio_models.py) was kept as a
+second independent tab — unlike the other two, it's not a video-frame
+pipeline, so it doesn't reintroduce the dependencies this build was split
+off to avoid.
 """
 
 import os
@@ -13,7 +17,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSlider, QSpinBox, QCheckBox,
-    QGroupBox, QFileDialog, QScrollArea, QSizePolicy
+    QGroupBox, QFileDialog, QScrollArea, QSizePolicy, QTabWidget
 )
 
 
@@ -24,6 +28,13 @@ class ControlsPanel(QWidget):
     pause_requested = pyqtSignal()
     resume_requested = pyqtSignal()
     cancel_requested = pyqtSignal()
+
+    # Mejorar Audio (VoiceFixer: ruido, reverberación, baja resolución, clipping)
+    audio_requested = pyqtSignal(dict)
+    audio_pause_requested = pyqtSignal()
+    audio_resume_requested = pyqtSignal()
+    audio_cancel_requested = pyqtSignal()
+
     file_selected = pyqtSignal(str)
 
     PANEL_WIDTH = 400
@@ -32,6 +43,7 @@ class ControlsPanel(QWidget):
         super().__init__(parent)
         self.setFixedWidth(self.PANEL_WIDTH)
         self._is_paused = False
+        self._is_audio_paused = False
 
         self._build_ui()
 
@@ -75,6 +87,28 @@ class ControlsPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(14, 14, 14, 14)
         main_layout.setSpacing(12)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_rescale_tab(), "🔍  Reescalar con IA")
+        self.tabs.addTab(self._build_audio_tab(), "🔊  Mejorar Audio")
+        main_layout.addWidget(self.tabs, stretch=1)
+
+    def set_active_tab_input_path(self, path: str):
+        """Routes a dropped/selected file to whichever tab is currently
+        showing (0 = Reescalar, 1 = Mejorar Audio)."""
+        if self.tabs.currentIndex() == 1:
+            self.set_audio_input_path(path)
+        else:
+            self.set_input_path(path)
+
+    # =====================================================================
+    # Tab 1: Reescalar con IA (Real-ESRGAN restoration/upscaling)
+    # =====================================================================
+    def _build_rescale_tab(self) -> QWidget:
+        outer = QWidget()
+        outer_lay = QVBoxLayout(outer)
+        outer_lay.setContentsMargins(0, 0, 0, 0)
+        outer_lay.setSpacing(14)
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -221,30 +255,48 @@ class ControlsPanel(QWidget):
         layout.addWidget(grp_enc)
 
         layout.addStretch(1)
-        main_layout.addWidget(self._scroll_wrap(container), stretch=1)
+        outer_lay.addWidget(self._scroll_wrap(container), stretch=1)
 
-        self.btn_start = QPushButton("✨  REESCALAR VIDEO")
-        self.btn_start.setObjectName("PrimaryButton")
-        self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_start.setToolTip("Reescala/restaura este video con Real-ESRGAN (fiel al original, más nítido y sin ruido).")
-        self.btn_start.clicked.connect(self._on_start_clicked)
-        main_layout.addWidget(self.btn_start)
+        row, self.btn_start, self.btn_pause, self.btn_cancel = self._action_row(
+            "✨  REESCALAR VIDEO",
+            "Reescala/restaura este video con Real-ESRGAN (fiel al original, más nítido y sin ruido).",
+            self._on_start_clicked, self._on_pause_clicked, self._on_cancel_clicked
+        )
+        outer_lay.addWidget(row)
+        return outer
+
+    def _action_row(self, start_text: str, start_tooltip: str, on_start, on_pause, on_cancel):
+        """Builds a self-contained Start/Pause/Cancel row. Each tab gets its
+        own — returns the three buttons so callers can enable/disable them."""
+        wrap = QWidget()
+        lay = QVBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        btn_start = QPushButton(start_text)
+        btn_start.setObjectName("PrimaryButton")
+        btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_start.setToolTip(start_tooltip)
+        btn_start.clicked.connect(on_start)
+        lay.addWidget(btn_start)
 
         h_actions = QHBoxLayout()
         h_actions.setSpacing(10)
-        self.btn_pause = QPushButton("⏸  Pausar")
-        self.btn_pause.setEnabled(False)
-        self.btn_pause.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_pause.clicked.connect(self._on_pause_clicked)
-        h_actions.addWidget(self.btn_pause)
+        btn_pause = QPushButton("⏸  Pausar")
+        btn_pause.setEnabled(False)
+        btn_pause.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_pause.clicked.connect(on_pause)
+        h_actions.addWidget(btn_pause)
 
-        self.btn_cancel = QPushButton("✕  Cancelar")
-        self.btn_cancel.setObjectName("SecondaryButton")
-        self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
-        h_actions.addWidget(self.btn_cancel)
-        main_layout.addLayout(h_actions)
+        btn_cancel = QPushButton("✕  Cancelar")
+        btn_cancel.setObjectName("SecondaryButton")
+        btn_cancel.setEnabled(False)
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.clicked.connect(on_cancel)
+        h_actions.addWidget(btn_cancel)
+        lay.addLayout(h_actions)
+
+        return wrap, btn_start, btn_pause, btn_cancel
 
     def set_input_path(self, path: str):
         """Sets the input file path and notifies listeners (used both by the
@@ -340,3 +392,154 @@ class ControlsPanel(QWidget):
         self.btn_cancel.setEnabled(False)
         self.btn_pause.setText("⏸  Pausar")
         self._is_paused = False
+
+    # =====================================================================
+    # Tab 2: Mejorar Audio (VoiceFixer speech restoration)
+    # =====================================================================
+    def _build_audio_tab(self) -> QWidget:
+        outer = QWidget()
+        outer_lay = QVBoxLayout(outer)
+        outer_lay.setContentsMargins(0, 0, 0, 0)
+        outer_lay.setSpacing(14)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+
+        grp_files = QGroupBox("📁  Video o Audio a Restaurar")
+        lay_files = QVBoxLayout(grp_files)
+        lay_files.setSpacing(6)
+
+        lay_files.addWidget(self._section_label("Archivo original"))
+        h_in = QHBoxLayout()
+        self.txt_audio_input = QLineEdit()
+        self.txt_audio_input.setPlaceholderText("Seleccionar archivo...")
+        btn_in = QPushButton("Examinar")
+        btn_in.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_in.clicked.connect(self._browse_audio_input)
+        h_in.addWidget(self.txt_audio_input)
+        h_in.addWidget(btn_in)
+        lay_files.addLayout(h_in)
+
+        lay_files.addWidget(self._section_label("Resultado (destino)"))
+        h_out = QHBoxLayout()
+        self.txt_audio_output = QLineEdit()
+        self.txt_audio_output.setPlaceholderText("Ruta de salida generada...")
+        btn_out = QPushButton("Guardar")
+        btn_out.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_out.clicked.connect(self._browse_audio_output)
+        h_out.addWidget(self.txt_audio_output)
+        h_out.addWidget(btn_out)
+        lay_files.addLayout(h_out)
+        layout.addWidget(grp_files)
+
+        grp_audio = QGroupBox("🔊  Restauración de Audio")
+        lay_audio = QVBoxLayout(grp_audio)
+        lay_audio.setSpacing(6)
+
+        notice = QLabel(
+            "Restaura la voz/diálogo con IA (VoiceFixer): reduce ruido de "
+            "fondo, reverberación/eco, graves de baja resolución y clipping, "
+            "todo en un solo modelo. Optimizado para voz — en música puede "
+            "introducir artefactos. Si el archivo es un video, la imagen no "
+            "se re-codifica, solo se reemplaza su pista de audio. Corre en "
+            "CPU: no usa la GPU ni tiene relación con el reescalado."
+        )
+        notice.setObjectName("FieldLabel")
+        notice.setWordWrap(True)
+        lay_audio.addWidget(notice)
+
+        lay_audio.addWidget(self._section_label("Modo de restauración"))
+        self.cmb_audio_mode = self._combo([
+            ("Automático — Recomendado", "Funciona bien para la mayoría de los casos de degradación moderada."),
+            ("Agresivo — Audio muy dañado", "Más efectivo en audio seriamente dañado; puede sonar menos natural en audio ya limpio."),
+        ])
+        lay_audio.addWidget(self.cmb_audio_mode)
+
+        lay_audio.addWidget(self._section_label("Calidad de audio de salida"))
+        self.cmb_audio_bitrate = self._combo([
+            ("192 kbps — Recomendado", "Buen balance entre calidad y tamaño de archivo."),
+            ("128 kbps", "Menor tamaño de archivo."),
+            ("256 kbps", "Mayor calidad."),
+            ("320 kbps — Máxima", "Máxima calidad disponible en AAC."),
+        ])
+        lay_audio.addWidget(self.cmb_audio_bitrate)
+        layout.addWidget(grp_audio)
+
+        layout.addStretch(1)
+        outer_lay.addWidget(self._scroll_wrap(container), stretch=1)
+
+        row, self.btn_audio_start, self.btn_audio_pause, self.btn_audio_cancel = self._action_row(
+            "🔊  MEJORAR AUDIO",
+            "Restaura ruido, reverberación, baja resolución y clipping en la voz/diálogo del audio (VoiceFixer, CPU).",
+            self._on_audio_start_clicked, self._on_audio_pause_clicked, self._on_audio_cancel_clicked
+        )
+        outer_lay.addWidget(row)
+        return outer
+
+    def set_audio_input_path(self, path: str):
+        self.txt_audio_input.setText(path)
+        base, ext = os.path.splitext(path)
+        out_ext = ext if ext.lower() in (".mp4", ".mkv", ".mov", ".avi", ".webm", ".ts") else ".wav"
+        self.txt_audio_output.setText(f"{base}_Audio_Restaurado{out_ext}")
+        self.file_selected.emit(path)
+
+    def _browse_audio_input(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar Video o Audio", "",
+            "Video o Audio (*.mp4 *.mkv *.mov *.avi *.webm *.ts *.wav *.mp3 *.flac *.m4a *.aac);;Todos los Archivos (*.*)"
+        )
+        if path:
+            self.set_audio_input_path(path)
+
+    def _browse_audio_output(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Resultado", self.txt_audio_output.text() or "",
+            "Video MP4 (*.mp4);;Video MKV (*.mkv);;Audio WAV (*.wav);;Audio MP3 (*.mp3);;Todos los Archivos (*.*)"
+        )
+        if path:
+            self.txt_audio_output.setText(path)
+
+    def _on_audio_start_clicked(self):
+        in_p = self.txt_audio_input.text().strip()
+        out_p = self.txt_audio_output.text().strip()
+        if not in_p or not os.path.isfile(in_p):
+            return
+
+        mode = 0 if self.cmb_audio_mode.currentIndex() == 0 else 2
+
+        bitrate_str = "".join(ch for ch in self.cmb_audio_bitrate.currentText().split(" ")[0] if ch.isdigit())
+        audio_bitrate_kbps = int(bitrate_str) if bitrate_str.isdigit() else 192
+
+        config = {
+            "input_path": in_p,
+            "output_path": out_p,
+            "mode": mode,
+            "audio_bitrate_kbps": audio_bitrate_kbps,
+        }
+
+        self.btn_audio_start.setEnabled(False)
+        self.btn_audio_pause.setEnabled(True)
+        self.btn_audio_cancel.setEnabled(True)
+        self.audio_requested.emit(config)
+
+    def _on_audio_pause_clicked(self):
+        if not self._is_audio_paused:
+            self._is_audio_paused = True
+            self.btn_audio_pause.setText("▶  Reanudar")
+            self.audio_pause_requested.emit()
+        else:
+            self._is_audio_paused = False
+            self.btn_audio_pause.setText("⏸  Pausar")
+            self.audio_resume_requested.emit()
+
+    def _on_audio_cancel_clicked(self):
+        self.audio_cancel_requested.emit()
+
+    def set_audio_finished(self):
+        self.btn_audio_start.setEnabled(True)
+        self.btn_audio_pause.setEnabled(False)
+        self.btn_audio_cancel.setEnabled(False)
+        self.btn_audio_pause.setText("⏸  Pausar")
+        self._is_audio_paused = False

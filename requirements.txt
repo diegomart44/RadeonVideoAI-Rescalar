@@ -5,3 +5,7 @@ onnxruntime-directml>=1.20
 numpy>=1.26
 requests>=2.31
 psutil>=6.0
+
+# Mejorar Audio tab (VoiceFixer: speech restoration — noise, reverberation,
+# low resolution, clipping). CPU-only, no DirectML/ONNX involved.
+voicefixer>=0.1.3

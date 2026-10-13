@@ -1,10 +1,11 @@
 # RadeonVideoAI (Reescalar)
 
 Suite de escritorio para Windows que reescala vídeo y mejora su calidad con IA
-(elimina ruido, reconstruye detalle y nitidez). Esta es una variante
-simplificada, centrada exclusivamente en el reescalado/restauración por IA —
-derivada del proyecto completo [RadeonVideoAI](https://github.com/diegomart44/RadeonVideoAI),
-que además incluye recreación generativa e interpolación de fotogramas.
+(elimina ruido, reconstruye detalle y nitidez), más una pestaña separada de
+restauración de audio. Esta es una variante simplificada, centrada en el
+reescalado/restauración por IA — derivada del proyecto completo
+[RadeonVideoAI](https://github.com/diegomart44/RadeonVideoAI), que además
+incluye recreación generativa e interpolación de fotogramas.
 
 Desarrollada y probada en hardware AMD de gama media (**AMD Ryzen 5 2600 +
 Radeon RX 9060 XT, 16 GB**), pero la detección de hardware es automática y no
@@ -83,6 +84,26 @@ corriendo por GPU igual.
   `libx265`/`libx264` por software en cualquier otro caso.
 - El audio original se preserva intacto (remux sin recodificar).
 
+## Pestaña "Mejorar Audio" — restauración de voz con IA
+
+Una segunda pestaña, independiente del reescalado y la única que **no**
+usa la GPU (`core/audio_engine.py` + `core/audio_models.py`): restaura la
+pista de audio de un vídeo, o un archivo de audio suelto (mp3, wav, flac,
+m4a, aac), con [VoiceFixer](https://github.com/haoheliu/voicefixer)
+(licencia MIT) — un modelo entrenado para arreglar voz/diálogo degradada
+por ruido de fondo, reverberación/eco, baja resolución (ancho de banda
+limitado) y clipping, las cuatro en un solo modelo.
+
+- **Solo toca el audio**: si la entrada es un vídeo, la imagen se copia
+  sin re-codificar (`-c:v copy`); solo se reemplaza la pista de audio.
+- **Pensado para voz, no para música**: en contenido musical puede meter
+  artefactos, porque el modelo no fue entrenado para eso.
+- **CPU únicamente**: VoiceFixer es PyTorch puro sin exportación a ONNX
+  disponible. Medido en el equipo de desarrollo a ~1.4x tiempo real por
+  segmento de 30s.
+- Descarga ~600MB de pesos pre-entrenados la primera vez que se usa
+  (`~/.cache/voicefixer/`, fuera de la carpeta del proyecto).
+
 ## Requisitos
 
 - Windows 10/11 64-bit.
@@ -119,6 +140,11 @@ desde Python).
 
 ## Uso
 
+La app tiene dos pestañas independientes — "Reescalar con IA" y "Mejorar
+Audio" (ver arriba) — cada una con su propio selector de archivo y botones
+de Iniciar/Pausar/Cancelar. Arrastrar un archivo a la ventana lo carga en
+la pestaña que esté activa en ese momento.
+
 1. Arrastra un vídeo a la ventana (o usa "Examinar...").
 2. Elige factor de reescalado (1x restauración / 2x / 4x) y modelo de IA —
    prueba más de uno con un clip corto para comparar calidad antes de
@@ -147,9 +173,9 @@ tipo de contenido (ver tabla arriba).
 python -m unittest discover -s tests
 ```
 
-`test_03_ai_model_forward` y `test_e2e.py` requieren red la primera vez
-(descargan los pesos oficiales); si no hay conexión, el primero se omite
-automáticamente.
+`test_03_ai_model_forward`, `test_e2e.py` y `test_audio_e2e.py` requieren
+red la primera vez (descargan los pesos oficiales); si no hay conexión, se
+omiten automáticamente.
 
 ## Licencias de los modelos
 
@@ -157,3 +183,6 @@ Los pesos de Real-ESRGAN se distribuyen bajo licencia BSD-3-Clause por sus
 autores (xinntao). Revisa el repositorio oficial
 (https://github.com/xinntao/Real-ESRGAN) para más detalles antes de un uso
 comercial.
+
+VoiceFixer (pestaña "Mejorar Audio") se distribuye bajo licencia MIT por su
+autor (Haohe Liu); ver https://github.com/haoheliu/voicefixer/blob/main/LICENSE.
